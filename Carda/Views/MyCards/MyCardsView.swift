@@ -33,6 +33,8 @@ struct MyCardsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BusinessCard.createdAt) private var allCards: [BusinessCard]
 
+    let accountAvatarImageData: Data?
+
     @State private var selectedIndex = 0
     @State private var editorMode: CardEditorMode?
     @State private var isAddSheetPresented = false
@@ -55,7 +57,7 @@ struct MyCardsView: View {
             ZStack(alignment: .topLeading) {
                 ScreenHeader(
                     title: "我的名片",
-                    avatarImageData: currentCard?.avatarImageData,
+                    avatarImageData: accountAvatarImageData,
                     avatarAction: handleAvatarTap
                 )
 
@@ -87,11 +89,15 @@ struct MyCardsView: View {
                         ContextActionMenu(
                             actions: [
                                 ContextAction(title: "编辑名片") {
-                                    isContextMenuVisible = false
+                                    withAnimation(.snappy(duration: 0.18)) {
+                                        isContextMenuVisible = false
+                                    }
                                     editorMode = .edit(card)
                                 },
                                 ContextAction(title: "保存为图片") {
-                                    isContextMenuVisible = false
+                                    withAnimation(.snappy(duration: 0.18)) {
+                                        isContextMenuVisible = false
+                                    }
                                     saveCurrentCard(card)
                                 },
                                 ContextAction(title: "删除名片", role: .destructive) {
@@ -101,6 +107,7 @@ struct MyCardsView: View {
                         )
                         .frame(width: 250)
                         .position(x: proxy.size.width / 2, y: 468)
+                        .transition(.cardaContextActionMenu)
                         .zIndex(11)
                     }
                 }
@@ -167,11 +174,15 @@ struct MyCardsView: View {
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.45)
                 .onEnded { _ in
-                    isContextMenuVisible = true
+                    withAnimation(.snappy(duration: 0.24)) {
+                        isContextMenuVisible = true
+                    }
                 }
         )
         .onTapGesture {
-            isContextMenuVisible = false
+            withAnimation(.snappy(duration: 0.18)) {
+                isContextMenuVisible = false
+            }
         }
     }
 
@@ -215,7 +226,9 @@ struct MyCardsView: View {
     }
 
     private func deleteCurrentCard(_ card: BusinessCard) {
-        isContextMenuVisible = false
+        withAnimation(.snappy(duration: 0.18)) {
+            isContextMenuVisible = false
+        }
         let nextCount = max(0, myCards.count - 1)
         let nextIndex = min(selectedIndex, max(0, nextCount - 1))
         modelContext.delete(card)
@@ -232,33 +245,113 @@ struct MyCardsView: View {
 }
 
 private struct MyCardCarousel: View {
+    private static let cardSpacing: CGFloat = 32
+    private static let pageAnimationDuration: TimeInterval = 0.18
+
     let cards: [BusinessCard]
     @Binding var selectedIndex: Int
     let width: CGFloat
+    @State private var dragOffset: CGFloat = 0
+    @State private var isSettlingPage = false
 
     var body: some View {
-        Group {
-            if let card = cards[safe: selectedIndex] {
-                BusinessCardView(data: card.renderData, width: width)
-                    .id(card.id)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
+        ZStack {
+            ForEach(visibleSlots, id: \.self) { slot in
+                if let card = card(for: slot) {
+                    BusinessCardView(data: card.renderData, width: width)
+                        .id("\(card.id.uuidString)-\(slot)")
+                        .offset(x: CGFloat(slot) * pageStride + dragOffset)
+                }
             }
         }
-        .gesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    guard cards.count > 1 else { return }
-                    if value.translation.width < -35 {
-                        selectedIndex = (selectedIndex + 1) % cards.count
-                    } else if value.translation.width > 35 {
-                        selectedIndex = (selectedIndex - 1 + cards.count) % cards.count
+        .frame(width: CardaTheme.canvasWidth, height: carouselHeight)
+        .contentShape(Rectangle())
+        .gesture(dragGesture)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                guard cards.count > 1, !isSettlingPage else { return }
+                dragOffset = clampedDragOffset(value.translation.width)
+            }
+            .onEnded { value in
+                guard cards.count > 1 else {
+                    dragOffset = 0
+                    return
+                }
+
+                let predicted = value.predictedEndTranslation.width
+                let measured = value.translation.width
+                if measured < -35 || predicted < -85 {
+                    settlePage(direction: .forward)
+                } else if measured > 35 || predicted > 85 {
+                    settlePage(direction: .backward)
+                } else {
+                    withAnimation(.snappy(duration: 0.14)) {
+                        dragOffset = 0
                     }
                 }
-        )
-        .animation(.snappy(duration: 0.24), value: selectedIndex)
+            }
+    }
+
+    private enum PageDirection {
+        case forward
+        case backward
+    }
+
+    private var visibleSlots: [Int] {
+        cards.count > 1 ? [-1, 0, 1] : [0]
+    }
+
+    private var pageStride: CGFloat {
+        width + Self.cardSpacing
+    }
+
+    private var carouselHeight: CGFloat {
+        let heights = cards.map { CardLayoutCalculator.height(for: $0.renderData) * width / CardaTheme.cardWidth }
+        return heights.max() ?? CardaTheme.baseCardHeight
+    }
+
+    private func card(for slot: Int) -> BusinessCard? {
+        guard !cards.isEmpty else { return nil }
+        return cards[wrappedIndex(selectedIndex + slot)]
+    }
+
+    private func wrappedIndex(_ index: Int) -> Int {
+        guard !cards.isEmpty else { return 0 }
+        return (index % cards.count + cards.count) % cards.count
+    }
+
+    private func clampedDragOffset(_ translation: CGFloat) -> CGFloat {
+        let limit = pageStride
+        return min(max(translation, -limit), limit)
+    }
+
+    private func settlePage(direction: PageDirection) {
+        guard !isSettlingPage else { return }
+        isSettlingPage = true
+
+        let targetOffset: CGFloat = direction == .forward ? -pageStride : pageStride
+        withAnimation(.snappy(duration: Self.pageAnimationDuration)) {
+            dragOffset = targetOffset
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pageAnimationDuration) {
+            switch direction {
+            case .forward:
+                selectedIndex = wrappedIndex(selectedIndex + 1)
+            case .backward:
+                selectedIndex = wrappedIndex(selectedIndex - 1)
+            }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                dragOffset = 0
+            }
+            isSettlingPage = false
+        }
     }
 }
 
@@ -381,6 +474,19 @@ struct ContextActionMenu: View {
             .padding(.vertical, 10)
         }
         .frame(width: 250, height: CGFloat(actions.count) * 42 + 20)
+    }
+}
+
+extension AnyTransition {
+    static var cardaContextActionMenu: AnyTransition {
+        .asymmetric(
+            insertion: .scale(scale: 0.92, anchor: .top)
+                .combined(with: .opacity)
+                .combined(with: .offset(y: -8)),
+            removal: .scale(scale: 0.96, anchor: .top)
+                .combined(with: .opacity)
+                .combined(with: .offset(y: -4))
+        )
     }
 }
 

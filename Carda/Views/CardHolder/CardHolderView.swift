@@ -26,8 +26,11 @@ private enum HolderCardEditorMode: Identifiable {
 struct CardHolderView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BusinessCard.createdAt) private var allCards: [BusinessCard]
+    @Query(sort: \BusinessCardList.sortOrder) private var cardLists: [BusinessCardList]
 
     let cards: [BusinessCard]
+    let accountAvatarImageData: Data?
+    let onAddList: () -> Void
 
     @State private var mode: HolderMode = .name
     @State private var expandedCardID: UUID?
@@ -54,10 +57,8 @@ struct CardHolderView: View {
                     ContactAlphabetIndex()
                         .position(x: 394, y: CardaTheme.canvasHeight / 2)
                         .zIndex(4)
-                }
 
-                if mode != .list && !cards.isEmpty {
-                    bottomScrollFade
+                    TransparentGradientBlur(height: 140)
                         .offset(y: 734)
                         .zIndex(4)
                 }
@@ -85,6 +86,7 @@ struct CardHolderView: View {
                         ])
                         .frame(width: 250)
                         .position(x: proxy.size.width / 2, y: 654)
+                        .transition(.cardaContextActionMenu)
                         .zIndex(11)
                     }
                 }
@@ -131,10 +133,6 @@ struct CardHolderView: View {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
-    private var currentUserAvatarImageData: Data? {
-        myCards.first?.avatarImageData
-    }
-
     private var topModeBar: some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
@@ -149,13 +147,18 @@ struct CardHolderView: View {
                 .position(x: CardaTheme.canvasWidth / 2, y: 90)
 
             if mode == .list {
-                listToolbarButton(title: "编辑", width: 72, textLeading: 19)
+                listToolbarButton(title: "编辑", width: 72, textLeading: 19, action: {})
                     .position(x: 52, y: 90)
 
-                listToolbarButton(title: "添加列表", width: 112, textLeading: 21.5)
+                listToolbarButton(
+                    title: "添加列表",
+                    width: 112,
+                    textLeading: 21.5,
+                    action: onAddList
+                )
                     .position(x: 330, y: 90)
             } else {
-                UserAvatarButton(imageData: currentUserAvatarImageData) {
+                UserAvatarButton(imageData: accountAvatarImageData) {
                     guard !myCards.isEmpty else { return }
                     isAddSheetPresented = true
                 }
@@ -199,12 +202,16 @@ struct CardHolderView: View {
         .position(x: x, y: 147)
     }
 
-    private func listToolbarButton(title: String, width: CGFloat, textLeading: CGFloat) -> some View {
-        Button {
-        } label: {
+    private func listToolbarButton(
+        title: String,
+        width: CGFloat,
+        textLeading: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
             ZStack(alignment: .topLeading) {
                 FigmaGlassShape(cornerRadius: 296, interactive: true)
-                    .shadow(color: .black.opacity(0.045), radius: 9, x: 0, y: 2)
+                    .shadow(color: .black.opacity(0.0225), radius: 9, x: 0, y: 2)
 
                 Text(title)
                     .font(CardaTheme.pingFang(size: 17, weight: .medium))
@@ -265,7 +272,11 @@ struct CardHolderView: View {
                 .matchedGeometryEffect(id: "holder-card-\(card.id)", in: cardExpansionNamespace)
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.45)
-                        .onEnded { _ in isContextMenuVisible = true }
+                        .onEnded { _ in
+                            withAnimation(.snappy(duration: 0.24)) {
+                                isContextMenuVisible = true
+                            }
+                        }
                 )
                 .onTapGesture {
                     withAnimation(.snappy(duration: 0.32)) {
@@ -288,28 +299,55 @@ struct CardHolderView: View {
 
     private var listModeContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 ForEach(Array(listRows.enumerated()), id: \.element.id) { index, row in
-                    listModeRow(row, showsTopSeparator: index > 0)
-
-                    if expandedListID == row.id {
-                        VStack(spacing: 8) {
-                            ForEach(cardsForList(row)) { card in
-                                CollapsedCardRow(data: card.renderData)
-                                    .frame(width: CardaTheme.canvasWidth, alignment: .center)
-                            }
-                        }
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    Section {
+                        expandedListCards(row)
+                    } header: {
+                        listModeRow(row, showsTopSeparator: index > 0)
                     }
                 }
             }
             .frame(width: CardaTheme.canvasWidth, alignment: .leading)
-            .padding(.top, 187)
+            .padding(.top, 27)
             .padding(.bottom, 160)
         }
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: CardaTheme.canvasHeight - 160 - 95,
+            alignment: .top
+        )
+        .offset(y: 160)
         .scrollIndicators(.hidden)
+    }
+
+    private func expandedListCards(_ row: HolderListRow) -> some View {
+        let isExpanded = expandedListID == row.id
+
+        return VStack(spacing: 8) {
+            ForEach(cardsForList(row)) { card in
+                CollapsedCardRow(data: card.renderData)
+                    .frame(width: CardaTheme.canvasWidth, alignment: .center)
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: isExpanded ? expandedListContentHeight(for: row) : 0,
+            alignment: .top
+        )
+        .offset(y: isExpanded ? 0 : -68)
+        .clipped()
+        .allowsHitTesting(isExpanded)
+        .zIndex(0)
+    }
+
+    private func expandedListContentHeight(for row: HolderListRow) -> CGFloat {
+        guard !row.cards.isEmpty else { return 0 }
+        let cardHeights = CGFloat(row.cards.count) * 60
+        let cardSpacing = CGFloat(max(0, row.cards.count - 1)) * 8
+        return cardHeights + cardSpacing + 20
     }
 
     private func listModeRow(_ row: HolderListRow, showsTopSeparator: Bool) -> some View {
@@ -321,13 +359,15 @@ struct CardHolderView: View {
             HStack(spacing: 0) {
                 Text(row.title)
                     .font(CardaTheme.pingFang(size: 17, weight: .regular))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(row.isUncategorized ? Color.black.opacity(0.35) : Color.black)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(1)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.22))
+                    .foregroundStyle(
+                        Color.black.opacity(row.isUncategorized ? 0.16 : 0.22)
+                    )
                     .rotationEffect(.degrees(expandedListID == row.id ? 90 : 0))
                     .frame(width: 16, height: 22)
             }
@@ -345,16 +385,15 @@ struct CardHolderView: View {
         }
         .buttonStyle(.plain)
         .padding(.leading, 19)
+        .frame(width: CardaTheme.canvasWidth, height: 53, alignment: .leading)
+        .background(holderBackgroundColor)
+        .zIndex(1)
     }
 
     private var emptyState: some View {
         Text("暂无收到的名片")
             .font(CardaTheme.pingFang(size: 17))
             .foregroundStyle(CardaTheme.formSecondaryText)
-    }
-
-    private var bottomScrollFade: some View {
-        TransparentGradientBlur(height: 140)
     }
 
     private var expandedCard: BusinessCard? {
@@ -402,19 +441,43 @@ struct CardHolderView: View {
     }
 
     private var listRows: [HolderListRow] {
-        [
-            HolderListRow(id: "classmates", title: "同学（20）", range: 0..<min(20, cards.count)),
-            HolderListRow(id: "lecture", title: "xx讲座（15）", range: 0..<min(15, cards.count)),
-            HolderListRow(id: "recruit", title: "招聘（6）", range: 0..<min(6, cards.count)),
-            HolderListRow(id: "meeting", title: "见面会（12）", range: 0..<min(12, cards.count))
+        let validListIDs = Set(cardLists.map(\.id))
+        let sortedLists = cardLists.sorted {
+            if $0.sortOrder == $1.sortOrder {
+                return $0.createdAt < $1.createdAt
+            }
+            return $0.sortOrder < $1.sortOrder
+        }
+        let assignedRows = sortedLists.map { list in
+            let assignedCards = cards
+                .filter { $0.cardListID == list.id }
+                .sorted { $0.createdAt > $1.createdAt }
+            return HolderListRow(
+                id: list.id.uuidString,
+                title: "\(list.name)（\(assignedCards.count)）",
+                cards: assignedCards,
+                isUncategorized: false
+            )
+        }
+        let uncategorizedCards = cards
+            .filter { card in
+                guard let cardListID = card.cardListID else { return true }
+                return !validListIDs.contains(cardListID)
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+
+        return assignedRows + [
+            HolderListRow(
+                id: "uncategorized",
+                title: "未分类（\(uncategorizedCards.count)）",
+                cards: uncategorizedCards,
+                isUncategorized: true
+            )
         ]
     }
 
     private func cardsForList(_ row: HolderListRow) -> [BusinessCard] {
-        let sorted = cards.sorted { $0.createdAt > $1.createdAt }
-        return row.range.compactMap { index in
-            sorted.indices.contains(index) ? sorted[index] : nil
-        }
+        row.cards
     }
 
     private func groupTitleFont(for title: String) -> Font {
@@ -451,7 +514,8 @@ struct CardHolderView: View {
 private struct HolderListRow: Identifiable {
     let id: String
     let title: String
-    let range: Range<Int>
+    let cards: [BusinessCard]
+    let isUncategorized: Bool
 }
 
 private struct ContactAlphabetIndex: View {

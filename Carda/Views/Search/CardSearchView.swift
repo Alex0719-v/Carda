@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct CardSearchView: View {
-    let cards: [BusinessCard]
+    let cardHolderCards: [BusinessCard]
     let searchText: String
     let isEditing: Bool
 
@@ -93,8 +93,8 @@ struct CardSearchView: View {
 
     private var recentCards: [BusinessCard] {
         let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
-        return cards
-            .filter { $0.ownerKind != .mine && ($0.receivedAt ?? $0.createdAt) >= weekAgo }
+        return cardHolderCards
+            .filter { ($0.receivedAt ?? $0.createdAt) >= weekAgo }
             .sorted { ($0.receivedAt ?? $0.createdAt) > ($1.receivedAt ?? $1.createdAt) }
     }
 
@@ -103,18 +103,18 @@ struct CardSearchView: View {
     }
 
     private var nameMatches: [BusinessCard] {
-        cards.filter {
+        cardHolderCards.filter {
             $0.name.localizedCaseInsensitiveContains(query)
                 || $0.phoneticName.localizedCaseInsensitiveContains(query)
         }
     }
 
     private var organizationMatches: [BusinessCard] {
-        cards.filter { $0.organizationName.localizedCaseInsensitiveContains(query) }
+        cardHolderCards.filter { $0.organizationName.localizedCaseInsensitiveContains(query) }
     }
 
     private var fieldMatches: [BusinessCard] {
-        cards.filter { card in
+        cardHolderCards.filter { card in
             card.fields.contains { field in
                 field.value.localizedCaseInsensitiveContains(query)
             }

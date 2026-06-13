@@ -16,6 +16,7 @@ final class BusinessCard {
     var organizationName: String
     @Attribute(.externalStorage) var avatarImageData: Data?
     @Attribute(.externalStorage) var companyLogoImageData: Data?
+    var cardListID: UUID?
     var createdAt: Date
     var updatedAt: Date
     var receivedAt: Date?
@@ -30,6 +31,7 @@ final class BusinessCard {
         organizationName: String,
         avatarImageData: Data? = nil,
         companyLogoImageData: Data? = nil,
+        cardListID: UUID? = nil,
         fields: [CardInfoField] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -43,6 +45,7 @@ final class BusinessCard {
         self.organizationName = organizationName
         self.avatarImageData = avatarImageData
         self.companyLogoImageData = companyLogoImageData
+        self.cardListID = cardListID
         self.fields = fields
         self.createdAt = createdAt
         self.updatedAt = updatedAt

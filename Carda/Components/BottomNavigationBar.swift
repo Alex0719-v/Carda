@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import WebKit
 
 enum AppSection: String, CaseIterable, Identifiable {
     case myCards
@@ -163,7 +162,7 @@ struct BottomNavigationBar: View {
                     activateSearchField()
                 }
             }
-            .offset(x: isSearchEditing ? 16 : 103, y: isSearchEditing ? 16 : 12)
+            .offset(x: isSearchEditing ? 16 : 103, y: 12)
 
             if isSearchEditing {
                 Button {
@@ -279,11 +278,6 @@ private enum MyIconFile {
         }
     }
 
-    var resourceURL: URL? {
-        Bundle.main.url(forResource: fileName, withExtension: "svg", subdirectory: "My icon")
-            ?? Bundle.main.url(forResource: fileName, withExtension: "svg")
-    }
-
     var size: CGSize {
         switch self {
         case .myCardsNormal:
@@ -302,78 +296,10 @@ private struct MyIconSVGView: View {
     let icon: MyIconFile
 
     var body: some View {
-        MyIconSVGWebView(icon: icon)
+        LocalSVGIconView(fileName: icon.fileName)
             .frame(width: icon.size.width, height: icon.size.height)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-    }
-}
-
-private struct MyIconSVGWebView: UIViewRepresentable {
-    let icon: MyIconFile
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.isUserInteractionEnabled = false
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        guard context.coordinator.loadedFileName != icon.fileName else { return }
-        context.coordinator.loadedFileName = icon.fileName
-
-        guard let url = icon.resourceURL else {
-            webView.loadHTMLString("", baseURL: nil)
-            return
-        }
-
-        let html = """
-        <!doctype html>
-        <html>
-        <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-        html, body {
-          width: 100%;
-          height: 100%;
-          margin: 0;
-          padding: 0;
-          overflow: hidden;
-          background: transparent;
-        }
-        body {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        img {
-          display: block;
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-        </style>
-        </head>
-        <body>
-        <img src="\(url.absoluteString)" alt="">
-        </body>
-        </html>
-        """
-
-        webView.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
-    }
-
-    final class Coordinator {
-        var loadedFileName: String?
     }
 }
 

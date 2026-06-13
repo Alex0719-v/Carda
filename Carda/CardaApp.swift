@@ -13,6 +13,7 @@ struct CardaApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             BusinessCard.self,
+            BusinessCardList.self,
             CardInfoField.self,
             Item.self,
         ])

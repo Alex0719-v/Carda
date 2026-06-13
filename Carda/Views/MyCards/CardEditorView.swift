@@ -136,7 +136,7 @@ struct CardEditorView: View {
                 color: .black,
                 placeholderColor: .black,
                 lineLimit: 1...1,
-                tracking: 8
+                tracking: 4
             )
             .frame(width: 210, height: 41, alignment: .leading)
 
@@ -517,9 +517,29 @@ private struct FigmaEditorTextField: View {
                     .foregroundStyle(placeholderColor)
                     .tracking(tracking)
                     .lineLimit(lineLimit.upperBound)
+                    .fixedSize(horizontal: isSingleLine, vertical: false)
                     .allowsHitTesting(false)
             }
 
+            textInput
+        }
+    }
+
+    private var isSingleLine: Bool {
+        lineLimit.upperBound == 1
+    }
+
+    @ViewBuilder
+    private var textInput: some View {
+        if isSingleLine {
+            TextField("", text: $text)
+                .font(font)
+                .foregroundStyle(color)
+                .tracking(tracking)
+                .textFieldStyle(.plain)
+                .lineLimit(1)
+                .disableAutocorrection(true)
+        } else {
             TextField("", text: $text, axis: .vertical)
                 .font(font)
                 .foregroundStyle(color)

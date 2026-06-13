@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import WebKit
 #if canImport(UIKit)
 import UIKit
 #elseif canImport(AppKit)
@@ -16,19 +15,67 @@ enum CardLayoutCalculator {
         let visible = data.visibleInfoFields
         let extraFields = max(0, visible.count - 3)
         let wrappedLines = visible.reduce(0) { partial, field in
-            partial + max(0, estimatedLineCount(for: field.value) - 1)
+            partial + extraInfoLineCount(for: field)
         }
         return CardaTheme.baseCardHeight
             + CGFloat(extraFields) * 24
             + CGFloat(wrappedLines) * 20
     }
 
+    static func extraInfoLineCount(for field: CardFieldDraft) -> Int {
+        max(0, infoLineCount(for: field) - 1)
+    }
+
+    static func infoLineCount(for field: CardFieldDraft) -> Int {
+        let trimmed = field.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return 1 }
+
+        #if canImport(UIKit)
+        return measuredLineCount(for: trimmed, kind: field.kind)
+        #else
+        return estimatedLineCount(for: trimmed)
+        #endif
+    }
+
     static func estimatedLineCount(for text: String) -> Int {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 1 }
         let maxCharactersPerLine = 18
-        return max(1, Int(ceil(Double(trimmed.count) / Double(maxCharactersPerLine))))
+        return trimmed
+            .components(separatedBy: .newlines)
+            .reduce(0) { partial, line in
+                partial + max(1, Int(ceil(Double(max(line.count, 1)) / Double(maxCharactersPerLine))))
+            }
     }
+
+    #if canImport(UIKit)
+    private static func measuredLineCount(for text: String, kind: CardFieldKind) -> Int {
+        let font = infoFont(for: kind)
+        let lineHeight = max(font.lineHeight, 1)
+
+        return text
+            .components(separatedBy: .newlines)
+            .reduce(0) { partial, line in
+                let measuredText = line.isEmpty ? " " : line
+                let rect = (measuredText as NSString).boundingRect(
+                    with: CGSize(width: 185, height: CGFloat.greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: [.font: font],
+                    context: nil
+                )
+                return partial + max(1, Int(ceil(rect.height / lineHeight)))
+            }
+    }
+
+    private static func infoFont(for kind: CardFieldKind) -> UIFont {
+        switch kind {
+        case .address:
+            UIFont(name: "PingFangSC-Regular", size: 14) ?? .systemFont(ofSize: 14, weight: .regular)
+        case .phone, .email, .link, .companyLogo:
+            .systemFont(ofSize: 14, weight: .regular)
+        }
+    }
+    #endif
 }
 
 struct BusinessCardView: View {
@@ -180,26 +227,36 @@ struct BusinessCardView: View {
 
     private var infoGroup: some View {
         let fields = data.visibleInfoFields
+        let infoDepth = max(
+            25,
+            fields.reduce(CGFloat.zero) { partial, field in
+                partial + 25 + CGFloat(CardLayoutCalculator.extraInfoLineCount(for: field)) * 20
+            }
+        )
         return VStack(alignment: .leading, spacing: 5 * scale) {
-            ForEach(fields) { field in
+            ForEach(fields, id: \.id) { field in
+                let lineCount = CardLayoutCalculator.infoLineCount(for: field)
                 HStack(alignment: .top, spacing: 0) {
                     Text(field.value)
                         .font(infoFont(for: field.kind, size: 14 * scale))
                         .foregroundStyle(CardaTheme.secondaryText)
                         .lineLimit(nil)
-                        .frame(width: 185 * scale, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(
+                            width: 185 * scale,
+                            height: CGFloat(lineCount) * 20 * scale,
+                            alignment: .leading
+                        )
                     Spacer(minLength: 0)
                     CardFieldIconView(kind: field.kind, scale: scale)
                         .frame(width: 20 * scale, height: 20 * scale)
                         .padding(.top, 0)
                 }
                 .frame(width: 223 * scale, alignment: .top)
-                .frame(minHeight: 20 * scale, alignment: .top)
+                .frame(minHeight: CGFloat(lineCount) * 20 * scale, alignment: .top)
             }
         }
         .frame(width: 223 * scale, alignment: .leading)
-        .offset(x: 127 * scale, y: (unscaledHeight - 20 - CGFloat(max(data.visibleInfoFields.count, 1)) * 25 + 6) * scale)
+        .offset(x: 127 * scale, y: (unscaledHeight - 20 - infoDepth + 6) * scale)
     }
 
     private func cardText(_ value: String, size: CGFloat, weight: Font.Weight) -> some View {
@@ -227,7 +284,7 @@ private struct CardFieldIconView: View {
     @ViewBuilder
     var body: some View {
         if let svgIcon = CardInfoSVGIcon(kind: kind) {
-            LocalCardSVGView(icon: svgIcon)
+            LocalSVGIconView(fileName: svgIcon.fileName)
                 .frame(width: 20 * scale, height: 20 * scale)
         } else if kind == .link {
             LinkIconShape()
@@ -270,79 +327,6 @@ private enum CardInfoSVGIcon {
         case .mail:
             "Mail"
         }
-    }
-
-    var resourceURL: URL? {
-        Bundle.main.url(forResource: fileName, withExtension: "svg", subdirectory: "My icon")
-            ?? Bundle.main.url(forResource: fileName, withExtension: "svg")
-    }
-}
-
-private struct LocalCardSVGView: UIViewRepresentable {
-    let icon: CardInfoSVGIcon
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView(frame: .zero)
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.isUserInteractionEnabled = false
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        guard context.coordinator.loadedFileName != icon.fileName else { return }
-        context.coordinator.loadedFileName = icon.fileName
-
-        guard let url = icon.resourceURL else {
-            webView.loadHTMLString("", baseURL: nil)
-            return
-        }
-
-        let html = """
-        <!doctype html>
-        <html>
-        <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-        html, body {
-          width: 100%;
-          height: 100%;
-          margin: 0;
-          padding: 0;
-          overflow: hidden;
-          background: transparent;
-        }
-        body {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        img {
-          display: block;
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-        </style>
-        </head>
-        <body>
-        <img src="\(url.absoluteString)" alt="">
-        </body>
-        </html>
-        """
-
-        webView.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
-    }
-
-    final class Coordinator {
-        var loadedFileName: String?
     }
 }
 
